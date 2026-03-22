@@ -57,6 +57,10 @@ function Get-RelativePathFromRoot {
     if (-not $FileFullPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
         return $null
     }
+    # Reject prefix collisions: e.g. D:\incoming vs D:\incoming_extra\file.jpg
+    if ($FileFullPath.Length -gt $root.Length -and $FileFullPath[$root.Length] -ne [char]'\') {
+        return $null
+    }
     return $FileFullPath.Substring($root.Length).TrimStart('\')
 }
 
@@ -92,8 +96,12 @@ foreach ($cloud in $clouds) {
         if ($DryRun) {
             Write-Host "[DRY RUN] Would create destination folder: $cloud"
         } else {
-            New-Item -ItemType Directory -Path $cloud -Force | Out-Null
-            Write-Host "Created destination: $cloud"
+            try {
+                New-Item -ItemType Directory -Path $cloud -Force | Out-Null
+                Write-Host "Created destination: $cloud"
+            } catch {
+                Write-Warning "Could not create destination folder (check drive letter / permissions): $cloud - $_"
+            }
         }
     }
 }
@@ -114,8 +122,13 @@ foreach ($cloud in $clouds) {
     $nameIndex[$cloud] = $set
 }
 
-$files = Get-ChildItem -LiteralPath $source -Recurse -File -ErrorAction Stop | Where-Object {
+$files = @(Get-ChildItem -LiteralPath $source -Recurse -File -ErrorAction Stop | Where-Object {
     $mediaExtensions -contains $_.Extension.ToLower()
+})
+
+if ($files.Count -eq 0) {
+    Write-Host "No media files found under $source (extensions: $($mediaExtensions -join ', '))."
+    return
 }
 
 foreach ($file in $files) {
